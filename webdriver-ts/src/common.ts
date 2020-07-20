@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
+import { LighthouseData } from './benchmarks';
 
 export interface JSONResult {
     framework: string, keyed: boolean, benchmark: string, type: string, min: number,
@@ -13,6 +14,7 @@ export type TBenchmarkStatus = 'OK'|'TEST_FAILED'|'TECHNICAL_ERROR';
 export interface ErrorAndWarning {
     error: String;
     warnings: String[];
+    result?: number[]|LighthouseData;
 }
 
 export interface BenchmarkDriverOptions {
@@ -24,9 +26,11 @@ export interface BenchmarkDriverOptions {
 
 export interface BenchmarkOptions extends BenchmarkDriverOptions {
     port: string;
+    batchSize: number;
     numIterationsForCPUBenchmarks: number;
     numIterationsForMemBenchmarks: number;
     numIterationsForStartupBenchmark: number;
+
 }
 
 export let config = {
@@ -34,7 +38,7 @@ export let config = {
     REMOTE_DEBUGGING_PORT: 9999,
     CHROME_PORT: 9998,
     REPEAT_RUN: 10,
-    REPEAT_RUN_MEM: 5,
+    REPEAT_RUN_MEM: 1,
     REPEAT_RUN_STARTUP: 4,
     DROP_WORST_RUN: 0,
     WARMUP_COUNT: 5,
@@ -48,7 +52,8 @@ export let config = {
     STARTUP_SLEEP_DURATION: 1000,
     FORK_CHROMEDRIVER: true,
     WRITE_RESULTS: true,
-    RESULTS_DIRECTORY: "results"
+    RESULTS_DIRECTORY: "results",
+    ALLOW_BATCHING: true
 }
 export type TConfig = typeof config;
 
@@ -58,6 +63,7 @@ export interface FrameworkData {
     uri: string;
     keyed: boolean;
     useShadowRoot: boolean;
+    useRowShadowRoot: boolean;
     issues: number[];
 }
 
@@ -81,7 +87,7 @@ export interface FrameworkId {
 
 abstract class FrameworkVersionInformationValid implements FrameworkId {
     public url: string;
-    constructor(public keyedType: KeyedType, public directory: string, customURL: string|undefined, public useShadowRoot: boolean, public issues: number[]) {
+    constructor(public keyedType: KeyedType, public directory: string, customURL: string|undefined, public useShadowRoot: boolean, public useRowShadowRoot: boolean, public issues: number[]) {
         this.keyedType = keyedType;
         this.directory = directory;
         this.url = 'frameworks/'+keyedType+'/'+directory + (customURL ? customURL : '');
@@ -90,14 +96,14 @@ abstract class FrameworkVersionInformationValid implements FrameworkId {
 
 export class FrameworkVersionInformationDynamic extends FrameworkVersionInformationValid  {
     constructor(keyedType: KeyedType, directory: string, public packageNames: string[],
-        customURL: string|undefined, useShadowRoot: boolean = false, issues: number[]) {
-            super(keyedType, directory, customURL, useShadowRoot, issues);
+        customURL: string|undefined, useShadowRoot: boolean = false, useRowShadowRoot: boolean = false, issues: number[]) {
+            super(keyedType, directory, customURL, useShadowRoot, useRowShadowRoot, issues);
         }
     }
 
 export class FrameworkVersionInformationStatic extends FrameworkVersionInformationValid  {
-    constructor(keyedType: KeyedType, directory: string, public frameworkVersion: string, customURL: string|undefined, useShadowRoot: boolean = false, issues: number[]) {
-        super(keyedType, directory, customURL, useShadowRoot, issues);
+    constructor(keyedType: KeyedType, directory: string, public frameworkVersion: string, customURL: string|undefined, useShadowRoot: boolean = false, useRowShadowRoot: boolean = false, issues: number[]) {
+        super(keyedType, directory, customURL, useShadowRoot, useRowShadowRoot, issues);
     }
     getFrameworkData(): FrameworkData {
         return {name: this.directory,
@@ -105,6 +111,7 @@ export class FrameworkVersionInformationStatic extends FrameworkVersionInformati
             uri: this.url,
             keyed: this.keyedType === 'keyed',
             useShadowRoot: this.useShadowRoot,
+            useRowShadowRoot: this.useRowShadowRoot,
             issues: this.issues
         }
     }
@@ -159,6 +166,7 @@ async function loadFrameworkInfo(pathInFrameworksDir: string): Promise<Framework
                     packageJSON['js-framework-benchmark']['frameworkVersionFromPackage'].split(':'),
                     packageJSON['js-framework-benchmark']['customURL'],
                     packageJSON['js-framework-benchmark']['useShadowRoot'],
+                    packageJSON['js-framework-benchmark']['useRowShadowRoot'],
                     packageJSON['js-framework-benchmark']['issues']
                 );
             } else if (typeof packageJSON['js-framework-benchmark']['frameworkVersion'] === 'string') {
@@ -166,6 +174,7 @@ async function loadFrameworkInfo(pathInFrameworksDir: string): Promise<Framework
                     packageJSON['js-framework-benchmark']['frameworkVersion'],
                     packageJSON['js-framework-benchmark']['customURL'],
                     packageJSON['js-framework-benchmark']['useShadowRoot'],
+                    packageJSON['js-framework-benchmark']['useRowShadowRoot'],
                     packageJSON['js-framework-benchmark']['issues']
                 );
             } else {
@@ -214,6 +223,7 @@ export class PackageVersionInformationResult {
             uri: this.framework.url,
             keyed: this.framework.keyedType === 'keyed',
             useShadowRoot: this.framework.useShadowRoot,
+            useRowShadowRoot: this.framework.useRowShadowRoot,
             issues: this.framework.issues
         }
     }
